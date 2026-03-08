@@ -82,6 +82,12 @@ class TradingBot:
         # Setup signal handlers
         self._setup_signal_handlers()
         
+        # Fetch actual capital from API
+        try:
+            self.risk_manager.update_capital()
+        except Exception as e:
+            self.logger.warning(f"Could not fetch account value: {e}")
+        
         self.logger.info(self.risk_manager.get_risk_summary())
     
     def _setup_signal_handlers(self):

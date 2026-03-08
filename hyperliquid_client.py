@@ -9,9 +9,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import eth_account
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
+from hyperliquid.utils import constants as hl_constants
 
 from config import Config
-from logger import TradeLogger, TradeDirection, get_logger
 
 
 @dataclass
@@ -52,7 +52,9 @@ class HyperliquidClient:
     Wrapper for Hyperliquid SDK with retry logic and error handling.
     """
     
-    def __init__(self, config: Config, logger: Optional[TradeLogger] = None):
+    def __init__(self, config: Config, logger=None):
+        from logger import TradeLogger, get_logger
+        
         self.config = config
         self.logger = logger or get_logger()
         
@@ -69,16 +71,27 @@ class HyperliquidClient:
     
     def _initialize_clients(self):
         """Initialize Hyperliquid API clients."""
-        api_url = self.config.api_url
+        # Use SDK constants directly based on environment
+        if self.config.is_testnet:
+            api_url = hl_constants.TESTNET_API_URL
+        else:
+            api_url = hl_constants.MAINNET_API_URL
         
         # Initialize Info client for market data
+        # Pass empty spot_meta to avoid testnet initialization issues
+        # We only trade perps, so spot data is not needed
         try:
-            self._info = Info(api_url, skip_ws=True)
+            self._info = Info(
+                api_url, 
+                skip_ws=True,
+                spot_meta={"universe": [], "tokens": []}
+            )
             self.logger.info(f"Initialized Info client: {api_url}")
         except Exception as e:
+            import traceback
             self.logger.error(f"Failed to initialize Info client: {e}")
+            self.logger.debug(traceback.format_exc())
             raise HyperliquidClientError(f"Failed to initialize API client: {e}")
-        
         # Initialize Exchange client for trading
         if not self.config.private_key:
             raise HyperliquidClientError("HYPERLIQUID_PRIVATE_KEY is required")
@@ -90,16 +103,22 @@ class HyperliquidClient:
                 pk = pk[2:]
             
             self._wallet = eth_account.Account.from_key(pk)
-            self._exchange = Exchange(self._wallet, api_url)
+            # Pass empty spot_meta to avoid testnet initialization issues
+            self._exchange = Exchange(
+                self._wallet, 
+                api_url,
+                spot_meta={"universe": [], "tokens": []}
+            )
             
             env_str = "PRODUCTION" if self.config.is_production else "TESTNET"
             self.logger.info(
                 f"Initialized Exchange client [{env_str}] for address: {self._wallet.address}"
             )
         except Exception as e:
+            import traceback
             self.logger.error(f"Failed to initialize Exchange client: {e}")
+            self.logger.debug(traceback.format_exc())
             raise HyperliquidClientError(f"Failed to initialize exchange: {e}")
-    
     def _retry_api_call(self, func, *args, **kwargs) -> Any:
         """
         Execute API call with retry logic and exponential backoff.
@@ -164,6 +183,38 @@ class HyperliquidClient:
         raise HyperliquidClientError(error_msg)
     
     def get_account_value(self) -> float:
+        """Get total account value in USDC."""
+        def _fetch():
+            if not self._wallet or not self._info:
+                raise HyperliquidClientError("Client not initialized")
+            
+            user_state = self._info.user_state(self._wallet.address)
+            
+            # Debug: log the full response to understand structure
+            self.logger.debug(f"user_state response: {user_state}")
+            
+            # Try to get account value from marginSummary
+            margin_summary = user_state.get("marginSummary", {})
+            account_value = margin_summary.get("accountValue", 0)
+            
+            # If 0, try alternative fields for unified account
+            if float(account_value) == 0:
+                # Check crossMarginSummary for unified accounts
+                cross_margin = user_state.get("crossMarginSummary", {})
+                if cross_margin:
+                    account_value = cross_margin.get("totalRawUsd", 0)
+                    self.logger.debug(f"Using crossMarginSummary.totalRawUsd: {account_value}")
+                
+                # Also check if there's available balance in withdrawable
+                if float(account_value) == 0:
+                    withdrawable = user_state.get("withdrawable", 0)
+                    if float(withdrawable) > 0:
+                        account_value = withdrawable
+                        self.logger.debug(f"Using withdrawable: {account_value}")
+            
+            return float(account_value) if account_value else 0.0
+        
+        return self._retry_api_call(_fetch)
         """Get total account value in USDC."""
         def _fetch():
             if not self._wallet or not self._info:
@@ -297,7 +348,7 @@ class HyperliquidClient:
     def open_position(
         self,
         coin: str,
-        direction: TradeDirection,
+        direction,
         size: float,
         stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
@@ -317,6 +368,8 @@ class HyperliquidClient:
         Returns:
             Tuple of (success, fill_price)
         """
+        from logger import TradeDirection
+        
         is_buy = direction == TradeDirection.LONG
         
         def _execute():
@@ -448,7 +501,7 @@ class HyperliquidClient:
     def update_stop_loss(
         self,
         coin: str,
-        direction: TradeDirection,
+        direction,
         size: float,
         new_stop_loss: float
     ) -> bool:
@@ -464,6 +517,8 @@ class HyperliquidClient:
         Returns:
             True if successful
         """
+        from logger import TradeDirection
+        
         # Cancel existing SL orders and place new one
         # Note: This is simplified - production would track order IDs
         try:

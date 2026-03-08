@@ -48,8 +48,9 @@ class RiskManager:
         self._capital: Optional[float] = None
     
     def update_capital(self) -> float:
-        """Update and return current capital."""
+        """Update and return current capital from API."""
         self._capital = self.client.get_account_value()
+        self.logger.info(f"Account value updated: {self._capital:.2f} USDC (from API)")
         return self._capital
     
     @property
@@ -57,7 +58,11 @@ class RiskManager:
         """Get current capital (updates if not set)."""
         if self._capital is None:
             self.update_capital()
-        return self._capital or self.config.capital_usdc
+        if self._capital is None:
+            self.logger.warning(f"Could not fetch account value, using config: {self.config.capital_usdc:.2f} USDC")
+            return self.config.capital_usdc
+        return self._capital
+    
     
     def calculate_position_size(
         self,
