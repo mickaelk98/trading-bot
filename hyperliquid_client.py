@@ -212,18 +212,38 @@ class HyperliquidClient:
                         account_value = withdrawable
                         self.logger.debug(f"Using withdrawable: {account_value}")
             
+            # If still 0, try portfolio API as fallback
+            if float(account_value) == 0:
+                account_value = self._fetch_portfolio_value()
+                if float(account_value) > 0:
+                    self.logger.debug(f"Using portfolio API fallback: {account_value}")
+            
             return float(account_value) if account_value else 0.0
         
         return self._retry_api_call(_fetch)
-        """Get total account value in USDC."""
-        def _fetch():
-            if not self._wallet or not self._info:
-                raise HyperliquidClientError("Client not initialized")
-            
-            user_state = self._info.user_state(self._wallet.address)
-            return float(user_state["marginSummary"]["accountValue"])
-        
-        return self._retry_api_call(_fetch)
+    
+    def _fetch_portfolio_value(self) -> float:
+        """Fetch account value from portfolio API as fallback."""
+        import requests
+        try:
+            response = requests.post(
+                "https://api.hyperliquid.xyz/info",
+                json={"type": "portfolio", "user": self._wallet.address},
+                timeout=10
+            )
+            if response.status_code == 200:
+                data = response.json()
+                # Portfolio returns [["day", {"accountValueHistory": [[ts, value], ...]}], ...]
+                for period in data:
+                    if period[0] == "day":
+                        history = period[1].get("accountValueHistory", [])
+                        if history:
+                            # Get the latest value
+                            latest = history[-1][1]
+                            return float(latest)
+        except Exception as e:
+            self.logger.debug(f"Portfolio API fallback failed: {e}")
+        return 0.0
     
     def get_positions(self) -> Dict[str, Position]:
         """
