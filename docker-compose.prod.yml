@@ -1,0 +1,57 @@
+# Production Docker Compose
+# - ENVIRONMENT=production (real tokens, real money)
+# - Restart automatically
+# - JSON logs
+# - Environment from .env file
+# - Frontend placeholder for future deployment
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hyperliquid-bot:latest
+    container_name: hyperliquid-bot-prod
+    restart: unless-stopped
+    volumes:
+      # Persist logs only (no code mount in production)
+      - ./logs:/app/logs
+    environment:
+      # Production settings (overrides .env)
+      - ENVIRONMENT=production
+    env_file:
+      - .env
+    networks:
+      - trading-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/main.py') else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Placeholder for future frontend service
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile.prod
+  #   image: hyperliquid-frontend:latest
+  #   container_name: hyperliquid-frontend-prod
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #   environment:
+  #     - NODE_ENV=production
+  #   networks:
+  #     - trading-network
+  #   depends_on:
+  #     - bot
+
+networks:
+  trading-network:
+    driver: bridge

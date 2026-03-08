@@ -1,0 +1,18 @@
+# Hyperliquid Trading Bot Dependencies
+
+# Hyperliquid SDK
+hyperliquid-python-sdk>=0.22.0
+
+# Data processing and technical analysis
+pandas>=2.0.0
+pandas-ta>=0.3.14b0
+numpy>=1.24.0
+
+# Ethereum account management
+eth-account>=0.10.0
+
+# Environment configuration
+python-dotenv>=1.0.0
+
+# Type hints (optional, for development)
+# types-requests>=2.31.0

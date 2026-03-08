@@ -1,0 +1,51 @@
+# Development Docker Compose
+# - ENVIRONMENT=testnet (fake tokens, for testing)
+# - Verbose logs
+# - Volume mounted for hot reload
+# - Frontend placeholder for future development
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hyperliquid-bot-dev
+    restart: "no"
+    volumes:
+      # Hot reload: mount source code
+      - ./:/app
+      # Persist logs
+      - ./logs:/app/logs
+    environment:
+      # Development settings
+      - ENVIRONMENT=testnet
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    networks:
+      - trading-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Placeholder for future frontend service
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: hyperliquid-frontend-dev
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - NODE_ENV=development
+  #   networks:
+  #     - trading-network
+  #   depends_on:
+  #     - bot
+
+networks:
+  trading-network:
+    driver: bridge
