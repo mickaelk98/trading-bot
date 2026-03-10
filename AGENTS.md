@@ -8,6 +8,19 @@ Automated trading bot for Hyperliquid DEX perpetual futures. Python 3.11+, modul
 
 **Stack**: hyperliquid-python-sdk, pandas, pandas-ta, eth-account, python-dotenv
 
+## Important Files
+
+- **ROADMAP.md** — Feature tracking with priorities. Check this for pending tasks and implementation status.
+- **.env** — Environment configuration (never commit, contains private key)
+
+Guidelines for AI coding agents working in this Hyperliquid Trading Bot repository.
+
+## Project Overview
+
+Automated trading bot for Hyperliquid DEX perpetual futures. Python 3.11+, modular architecture.
+
+**Stack**: hyperliquid-python-sdk, pandas, pandas-ta, eth-account, python-dotenv
+
 ## Build & Run Commands
 
 ```bash
