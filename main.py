@@ -220,7 +220,10 @@ class TradingBot:
                 atr=indicators.atr
             )
         else:
-            self.logger.error(f"Failed to open position for {coin}")
+            if not success:
+                self.logger.error(f"Failed to open position for {coin}")
+            else:
+                self.logger.error(f"Position opened for {coin} but fill_price is None - this should not happen")
     
     def _process_exit_signal(
         self,

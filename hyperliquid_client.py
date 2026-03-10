@@ -417,6 +417,11 @@ class HyperliquidClient:
                     fill_price = float(status["filled"]["avgPx"])
                     break
             
+            # Fallback: get mid price if fill_price not found
+            if fill_price is None:
+                fill_price = self.get_mid_price(coin)
+                self.logger.warning(f"Could not extract fill price from response, using mid price: {fill_price}")
+            
             # Place SL/TP orders if specified
             if stop_loss and take_profit:
                 self._place_sl_tp_orders(coin, is_buy, size, stop_loss, take_profit)
