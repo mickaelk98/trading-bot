@@ -118,12 +118,20 @@ class TradingBot:
             candles_needed = self._get_required_candles()
             start_time = end_time - (candles_needed * interval_ms)
             
-            return self.client.get_candles(
+            self.logger.debug(f"Fetching {candles_needed} candles for {coin}, timeframe={config.timeframe}, interval_ms={interval_ms}")
+            
+            candles = self.client.get_candles(
                 coin, config.timeframe, start_time, end_time
             )
+            
+            self.logger.debug(f"Got {len(candles) if candles else 0} candles for {coin}")
+            
+            return candles
         except (HyperliquidClientError, APITimeoutError) as e:
             self.logger.error(f"Failed to fetch candles for {coin}: {e}")
             return None
+    
+    def _check_position_status(self, coin: str) -> Optional[str]:
     
     def _check_position_status(self, coin: str) -> Optional[str]:
         """
@@ -305,6 +313,14 @@ class TradingBot:
             )
     
     def _process_coin(self, coin: str):
+        """Process a single trading pair."""
+        # Fetch candles
+        candles = self._fetch_candles(coin)
+        if not candles:
+            self.logger.warning(f"No candles data for {coin}")
+            return
+        
+        self.logger.debug(f"Fetched {len(candles)} candles for {coin}")
         """Process a single trading pair."""
         # Fetch candles
         candles = self._fetch_candles(coin)

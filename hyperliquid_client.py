@@ -303,6 +303,12 @@ class HyperliquidClient:
                 coin, interval, start_time, end_time
             )
             
+            self.logger.debug(f"API returned {len(raw_candles) if raw_candles else 0} candles for {coin}")
+            
+            candles = []
+                coin, interval, start_time, end_time
+            )
+            
             candles = []
             for c in raw_candles:
                 candles.append(Candle(
