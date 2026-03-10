@@ -51,6 +51,9 @@ class Config:
     # API settings
     log_level: str = "INFO"
     
+    # Candles limit for API fetch (hardcoded minimum for reliable indicators)
+    candles_limit: int = 500
+    
     # Strategy parameters
     ema_fast_period: int = 9
     ema_slow_period: int = 21
@@ -108,6 +111,9 @@ class Config:
         
         # Timeframe
         self.timeframe = os.getenv("TIMEFRAME", "1h")
+        
+        # Candles limit (hardcoded minimum for reliable indicators)
+        self.candles_limit = int(os.getenv("CANDLES_LIMIT", "500"))
         
         # Log level
         self.log_level = os.getenv("LOG_LEVEL", "INFO").upper()

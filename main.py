@@ -105,7 +105,7 @@ class TradingBot:
     
     def _get_required_candles(self) -> int:
         """Get number of candles needed for strategy."""
-        return self.strategy.min_candles + 10  # Buffer
+        return config.candles_limit  # Hardcoded 500 candles for reliable indicators
     
     def _fetch_candles(self, coin: str) -> Optional[list]:
         """Fetch historical candles for a coin."""
@@ -131,8 +131,7 @@ class TradingBot:
             self.logger.error(f"Failed to fetch candles for {coin}: {e}")
             return None
     
-    def _check_position_status(self, coin: str) -> Optional[str]:
-    
+
     def _check_position_status(self, coin: str) -> Optional[str]:
         """
         Check current position status for a coin.

@@ -143,8 +143,10 @@ class Strategy:
         # Compute ATR
         atr = ta.atr(df["high"], df["low"], df["close"], length=self.atr_period)
         
-        # Check if all indicators are computed (not NaN)
-        if ema_slow.isna().any() or rsi.isna().any() or atr.isna().any():
+        # Check if the last two values are computed (not NaN) - only these are used
+        if (pd.isna(ema_slow.iloc[-1]) or pd.isna(ema_slow.iloc[-2]) or
+            pd.isna(rsi.iloc[-1]) or pd.isna(rsi.iloc[-2]) or
+            pd.isna(atr.iloc[-1])):
             return None
         
         # Get last two values for crossover detection
