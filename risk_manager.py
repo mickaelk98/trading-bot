@@ -113,12 +113,11 @@ class RiskManager:
             risk_amount = self.capital * self.max_risk_per_trade
         
         return PositionSize(
-            size=leveraged_size,
+            size=round(leveraged_size, 4),  # Round to 4 decimals for Hyperliquid API
             notional_value=notional_value,
             risk_amount=risk_amount,
             max_loss_percent=self.max_risk_per_trade * 100
         )
-    
     def calculate_sl_tp(
         self,
         signal: Signal,
@@ -289,9 +288,9 @@ class RiskManager:
         
         actual_rr = tp_distance / sl_distance if sl_distance > 0 else 0
         
-        if actual_rr < self.reward_to_risk:
+        # Use small epsilon for float comparison to handle precision issues
+        if actual_rr < self.reward_to_risk - 0.001:
             return False, f"Risk/reward ratio ({actual_rr:.2f}) below minimum ({self.reward_to_risk})"
-        
         return True, ""
     
     def get_risk_summary(self) -> str:
