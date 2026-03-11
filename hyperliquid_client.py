@@ -507,13 +507,29 @@ class HyperliquidClient:
                 
                 # Log full SL response (INFO level to see it)
                 self.logger.info(f"SL response for {coin}: {sl_result}")
-                # Verify SL response
-                if sl_result.get("status") != "ok":
+                # Verify SL response - check individual order status
+                sl_statuses = sl_result.get("response", {}).get("data", {}).get("statuses", [])
+                if sl_result.get("status") != "ok" or not sl_statuses:
                     self.logger.error(f"SL order failed for {coin}: {sl_result}")
                     if attempt < max_attempts:
                         time.sleep(1)
                         continue
                     return False
+                
+                # Check if order has error or is resting
+                sl_status = sl_statuses[0] if sl_statuses else {}
+                if "error" in sl_status:
+                    self.logger.error(f"SL order rejected for {coin}: {sl_status['error']}")
+                    if attempt < max_attempts:
+                        time.sleep(1)
+                        continue
+                    return False
+                
+                sl_oid = None
+                if "resting" in sl_status:
+                    sl_oid = sl_status["resting"].get("oid")
+                    self.logger.info(f"SL order placed for {coin}, oid={sl_oid}")
+                
                 tp_type = {
                     "trigger": {
                         "triggerPx": tp_price,
@@ -529,39 +545,57 @@ class HyperliquidClient:
                 # Log full TP response (INFO level to see it)
                 self.logger.info(f"TP order response for {coin}: {tp_result}")
                 
-                # Verify TP response
-                if tp_result.get("status") != "ok":
+                # Verify TP response - check individual order status
+                tp_statuses = tp_result.get("response", {}).get("data", {}).get("statuses", [])
+                if tp_result.get("status") != "ok" or not tp_statuses:
                     self.logger.error(f"TP order failed for {coin}: {tp_result}")
                     if attempt < max_attempts:
                         time.sleep(1)
                         continue
                     return False
-                # Verify orders exist on exchange
+                
+                # Check if order has error or is resting
+                tp_status = tp_statuses[0] if tp_statuses else {}
+                if "error" in tp_status:
+                    self.logger.error(f"TP order rejected for {coin}: {tp_status['error']}")
+                    if attempt < max_attempts:
+                        time.sleep(1)
+                        continue
+                    return False
+                
+                tp_oid = None
+                if "resting" in tp_status:
+                    tp_oid = tp_status["resting"].get("oid")
+                    self.logger.info(f"TP order placed for {coin}, oid={tp_oid}")
+                
+                # If we got oids from both orders, they are confirmed
+                if sl_oid and tp_oid:
+                    self.logger.info(
+                        f"Confirmed SL/TP orders for {coin}: "
+                        f"SL={sl_price:.4f} (oid={sl_oid}), TP={tp_price:.4f} (oid={tp_oid})"
+                    )
+                    return True
+                # Fallback: verify orders exist on exchange
                 time.sleep(0.5)  # Brief pause for API propagation
                 open_orders = self.get_open_orders(coin)
                 
-                # Debug: log order structure to understand API response
-                if open_orders:
-                    self.logger.debug(f"Open orders for {coin}: {open_orders}")
-                
-                # Check for SL/TP orders - structure may vary
+                # Check for SL/TP orders
                 sl_found = False
                 tp_found = False
                 
                 for o in open_orders:
-                    # Try different possible structures
-                    order_data = o.get("order", {})
-                    
-                    # Structure 1: order.trigger.tpsl
-                    trigger = order_data.get("trigger", {})
-                    if trigger.get("tpsl") == "sl":
-                        sl_found = True
-                    elif trigger.get("tpsl") == "tp":
-                        tp_found = True
-                    
-                    # Structure 2: trigger at top level
-                    if not sl_found or not tp_found:
-                        trigger = o.get("trigger", {})
+                    order_type = o.get("orderType", "")
+                    # Check orderType field for trigger orders
+                    if "Stop" in order_type or "Take" in order_type:
+                        if "Stop" in order_type:
+                            sl_found = True
+                        if "Take" in order_type:
+                            tp_found = True
+                    else:
+                        # Also check nested trigger structure
+                        trigger = o.get("order", {}).get("trigger", {})
+                        if not trigger:
+                            trigger = o.get("trigger", {})
                         if trigger.get("tpsl") == "sl":
                             sl_found = True
                         elif trigger.get("tpsl") == "tp":
@@ -569,7 +603,7 @@ class HyperliquidClient:
                 
                 if sl_found and tp_found:
                     self.logger.info(
-                        f"Placed and verified SL/TP orders for {coin}: "
+                        f"Verified SL/TP orders on exchange for {coin}: "
                         f"SL={sl_price:.4f}, TP={tp_price:.4f}"
                     )
                     return True
@@ -595,6 +629,7 @@ class HyperliquidClient:
             f"position may not be protected!"
         )
         return False
+    
     def close_position(
         self,
         coin: str,
@@ -644,16 +679,49 @@ class HyperliquidClient:
         except HyperliquidClientError as e:
             self.logger.error(f"Failed to close position: {e}")
             return False, None
+    
+    def update_stop_loss(
+        self,
+        coin: str,
+        direction,
+        size: float,
+        new_stop_loss: float
+    ) -> bool:
+        """
+        Update stop loss order for trailing stop functionality.
+        
+        Cancels existing SL order and places a new one at the updated price.
+        
+        Args:
+            coin: Trading pair
+            direction: TradeDirection (LONG or SHORT)
+            size: Position size
+            new_stop_loss: New stop loss price
+            
+        Returns:
+            True if successful
+        """
+        from logger import TradeDirection
+        
+        if not self._exchange:
+            self.logger.error("Cannot update stop loss: exchange not initialized")
+            return False
+        
         try:
-            # CANCEL EXISTING SL ORDERS FIRST
+            # Cancel existing SL orders first
             self._cancel_sl_tp_orders(coin)
             
-            # Place new SL order
+            # Determine order side based on position direction
             is_buy = direction == TradeDirection.LONG
             
             # Round prices for Hyperliquid API
             sl_price = round_price(new_stop_loss, coin)
-            sl_limit = round_price(new_stop_loss * 0.99, coin)
+            # For SL: if long, we sell below market; if short, we buy above market
+            # Limit price should be worse than trigger to ensure fill
+            if is_buy:
+                sl_limit = round_price(new_stop_loss * 0.99, coin)  # Sell lower
+            else:
+                sl_limit = round_price(new_stop_loss * 1.01, coin)  # Buy higher
             
             sl_type = {
                 "trigger": {
@@ -668,16 +736,26 @@ class HyperliquidClient:
                 sl_type, reduce_only=True
             )
             
-            if result.get("status") == "ok":
-                self.logger.debug(f"Updated trailing stop for {coin} to {sl_price:.4f}")
-                return True
-            else:
+            # Verify response
+            if result.get("status") != "ok":
                 self.logger.error(f"Failed to place new SL order: {result}")
                 return False
-                
-        except Exception as e:
-            self.logger.error(f"Failed to update stop loss: {e}")
-            return False
+            
+            # Check individual order status
+            statuses = result.get("response", {}).get("data", {}).get("statuses", [])
+            if statuses:
+                order_status = statuses[0]
+                if "error" in order_status:
+                    self.logger.error(f"SL order rejected: {order_status['error']}")
+                    return False
+                if "resting" in order_status:
+                    oid = order_status["resting"].get("oid")
+                    self.logger.debug(f"Updated trailing stop for {coin} to {sl_price:.4f} (oid={oid})")
+                    return True
+            
+            self.logger.warning(f"SL order response unclear: {result}")
+            return True  # Assume success if no error
+            
         except Exception as e:
             self.logger.error(f"Failed to update stop loss: {e}")
             return False
