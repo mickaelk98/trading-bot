@@ -16,10 +16,10 @@ from config import Config
 
 # Price rounding precision for different coins (decimal places)
 PRICE_PRECISION = {
-    "BTC": 1,      # 1 decimal for BTC
-    "ETH": 2,      # 2 decimals for ETH
-    "SOL": 2,     # 2 decimals for SOL
-    "DOGE": 5,    # 5 decimals for DOGE
+    "BTC": 0,      # BTC tick size is $1 (whole numbers)
+    "ETH": 1,      # ETH tick size is $0.10
+    "SOL": 2,      # SOL tick size is $0.01
+    "DOGE": 5,     # DOGE tick size is $0.00001
     "DEFAULT": 2,  # Default 2 decimals
 }
 
