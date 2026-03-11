@@ -489,6 +489,9 @@ class HyperliquidClient:
                 sl_limit = round_price(stop_loss * 0.99, coin)
                 tp_limit = round_price(take_profit * 1.01, coin)
                 
+                # Log order parameters (INFO level)
+                self.logger.info(f"Placing SL/TP for {coin}: SL={sl_price}, TP={tp_price}, size={size}")
+                
                 # Stop loss order
                 sl_type = {
                     "trigger": {
@@ -502,6 +505,8 @@ class HyperliquidClient:
                     sl_type, reduce_only=True
                 )
                 
+                # Log full SL response (INFO level to see it)
+                self.logger.info(f"SL response for {coin}: {sl_result}")
                 # Verify SL response
                 if sl_result.get("status") != "ok":
                     self.logger.error(f"SL order failed for {coin}: {sl_result}")
@@ -509,8 +514,6 @@ class HyperliquidClient:
                         time.sleep(1)
                         continue
                     return False
-                
-                # Take profit order
                 tp_type = {
                     "trigger": {
                         "triggerPx": tp_price,
@@ -522,6 +525,9 @@ class HyperliquidClient:
                     coin, not is_buy, size, tp_limit,
                     tp_type, reduce_only=True
                 )
+                
+                # Log full TP response (INFO level to see it)
+                self.logger.info(f"TP order response for {coin}: {tp_result}")
                 
                 # Verify TP response
                 if tp_result.get("status") != "ok":
@@ -672,7 +678,6 @@ class HyperliquidClient:
         except Exception as e:
             self.logger.error(f"Failed to update stop loss: {e}")
             return False
-                
         except Exception as e:
             self.logger.error(f"Failed to update stop loss: {e}")
             return False
