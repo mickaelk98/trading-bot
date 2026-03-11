@@ -14,6 +14,31 @@ from hyperliquid.utils import constants as hl_constants
 from config import Config
 
 
+# Price rounding precision for different coins (decimal places)
+PRICE_PRECISION = {
+    "BTC": 1,      # 1 decimal for BTC
+    "ETH": 2,      # 2 decimals for ETH
+    "SOL": 2,     # 2 decimals for SOL
+    "DOGE": 5,    # 5 decimals for DOGE
+    "DEFAULT": 2,  # Default 2 decimals
+}
+
+
+def round_price(price: float, coin: str = "DEFAULT") -> float:
+    """Round price to appropriate precision for Hyperliquid API.
+    
+    Hyperliquid requires prices to be properly rounded to avoid 'float_to_wire causes rounding' error.
+    
+    Args:
+        price: Price to round
+        coin: Trading pair to determine precision
+        
+    Returns:
+        Rounded price
+    """
+    precision = PRICE_PRECISION.get(coin, PRICE_PRECISION["DEFAULT"])
+    return round(price, precision)
+
 @dataclass
 class Position:
     """Represents an open position."""
@@ -458,16 +483,22 @@ class HyperliquidClient:
                 # Cancel existing SL/TP orders first
                 self._cancel_sl_tp_orders(coin)
                 
+                # Round prices to proper precision for Hyperliquid
+                sl_price = round_price(stop_loss, coin)
+                tp_price = round_price(take_profit, coin)
+                sl_limit = round_price(stop_loss * 0.99, coin)
+                tp_limit = round_price(take_profit * 1.01, coin)
+                
                 # Stop loss order
                 sl_type = {
                     "trigger": {
-                        "triggerPx": float(stop_loss),
+                        "triggerPx": sl_price,
                         "isMarket": True,
                         "tpsl": "sl"
                     }
                 }
                 sl_result = self._exchange.order(
-                    coin, not is_buy, size, float(stop_loss) * 0.99,
+                    coin, not is_buy, size, sl_limit,
                     sl_type, reduce_only=True
                 )
                 
@@ -482,13 +513,13 @@ class HyperliquidClient:
                 # Take profit order
                 tp_type = {
                     "trigger": {
-                        "triggerPx": float(take_profit),
+                        "triggerPx": tp_price,
                         "isMarket": True,
                         "tpsl": "tp"
                     }
                 }
                 tp_result = self._exchange.order(
-                    coin, not is_buy, size, float(take_profit) * 1.01,
+                    coin, not is_buy, size, tp_limit,
                     tp_type, reduce_only=True
                 )
                 
@@ -499,29 +530,47 @@ class HyperliquidClient:
                         time.sleep(1)
                         continue
                     return False
-                
                 # Verify orders exist on exchange
                 time.sleep(0.5)  # Brief pause for API propagation
                 open_orders = self.get_open_orders(coin)
-                sl_found = any(
-                    o.get("order", {}).get("trigger", {}).get("tpsl") == "sl"
-                    for o in open_orders
-                )
-                tp_found = any(
-                    o.get("order", {}).get("trigger", {}).get("tpsl") == "tp"
-                    for o in open_orders
-                )
+                
+                # Debug: log order structure to understand API response
+                if open_orders:
+                    self.logger.debug(f"Open orders for {coin}: {open_orders}")
+                
+                # Check for SL/TP orders - structure may vary
+                sl_found = False
+                tp_found = False
+                
+                for o in open_orders:
+                    # Try different possible structures
+                    order_data = o.get("order", {})
+                    
+                    # Structure 1: order.trigger.tpsl
+                    trigger = order_data.get("trigger", {})
+                    if trigger.get("tpsl") == "sl":
+                        sl_found = True
+                    elif trigger.get("tpsl") == "tp":
+                        tp_found = True
+                    
+                    # Structure 2: trigger at top level
+                    if not sl_found or not tp_found:
+                        trigger = o.get("trigger", {})
+                        if trigger.get("tpsl") == "sl":
+                            sl_found = True
+                        elif trigger.get("tpsl") == "tp":
+                            tp_found = True
                 
                 if sl_found and tp_found:
                     self.logger.info(
                         f"Placed and verified SL/TP orders for {coin}: "
-                        f"SL={stop_loss:.4f}, TP={take_profit:.4f}"
+                        f"SL={sl_price:.4f}, TP={tp_price:.4f}"
                     )
                     return True
                 else:
                     self.logger.warning(
                         f"SL/TP orders not confirmed on attempt {attempt}/{max_attempts}: "
-                        f"SL_found={sl_found}, TP_found={tp_found}"
+                        f"SL_found={sl_found}, TP_found={tp_found}, orders_count={len(open_orders)}"
                     )
                     if attempt < max_attempts:
                         time.sleep(1)
@@ -589,56 +638,40 @@ class HyperliquidClient:
         except HyperliquidClientError as e:
             self.logger.error(f"Failed to close position: {e}")
             return False, None
-    def update_stop_loss(
-        self,
-        coin: str,
-        direction,
-        size: float,
-        new_stop_loss: float
-    ) -> bool:
-        """
-        Update stop loss (cancel old SL, place new one).
-        
-        Args:
-            coin: Trading pair
-            direction: Position direction
-            size: Position size
-            new_stop_loss: New stop loss price
-            
-        Returns:
-            True if successful
-        """
-        from logger import TradeDirection
-        
-        if not self._exchange:
-            self.logger.error("Cannot update stop loss: exchange not initialized")
-            return False
-        
         try:
             # CANCEL EXISTING SL ORDERS FIRST
             self._cancel_sl_tp_orders(coin)
             
             # Place new SL order
             is_buy = direction == TradeDirection.LONG
+            
+            # Round prices for Hyperliquid API
+            sl_price = round_price(new_stop_loss, coin)
+            sl_limit = round_price(new_stop_loss * 0.99, coin)
+            
             sl_type = {
                 "trigger": {
-                    "triggerPx": float(new_stop_loss),
+                    "triggerPx": sl_price,
                     "isMarket": True,
                     "tpsl": "sl"
                 }
             }
             
             result = self._exchange.order(
-                coin, not is_buy, size, float(new_stop_loss) * 0.99,
+                coin, not is_buy, size, sl_limit,
                 sl_type, reduce_only=True
             )
             
             if result.get("status") == "ok":
-                self.logger.debug(f"Updated trailing stop for {coin} to {new_stop_loss:.4f}")
+                self.logger.debug(f"Updated trailing stop for {coin} to {sl_price:.4f}")
                 return True
             else:
                 self.logger.error(f"Failed to place new SL order: {result}")
                 return False
+                
+        except Exception as e:
+            self.logger.error(f"Failed to update stop loss: {e}")
+            return False
                 
         except Exception as e:
             self.logger.error(f"Failed to update stop loss: {e}")
