@@ -441,44 +441,105 @@ class HyperliquidClient:
         size: float,
         stop_loss: float,
         take_profit: float
-    ):
-        """Place stop loss and take profit orders."""
-        if not self._exchange:
-            return
+    ) -> bool:
+        """Place stop loss and take profit orders with verification.
         
-        try:
-            # Stop loss order
-            sl_type = {
-                "trigger": {
-                    "triggerPx": stop_loss,
-                    "isMarket": True,
-                    "tpsl": "sl"
+        Returns:
+            True if both SL and TP orders are confirmed on exchange
+        """
+        if not self._exchange:
+            self.logger.error("Cannot place SL/TP: exchange not initialized")
+            return False
+        
+        max_attempts = 3
+        
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Cancel existing SL/TP orders first
+                self._cancel_sl_tp_orders(coin)
+                
+                # Stop loss order
+                sl_type = {
+                    "trigger": {
+                        "triggerPx": float(stop_loss),
+                        "isMarket": True,
+                        "tpsl": "sl"
+                    }
                 }
-            }
-            self._exchange.order(
-                coin, not is_buy, size, stop_loss * 0.99,  # Limit price slightly worse
-                sl_type, reduce_only=True
-            )
-            
-            # Take profit order
-            tp_type = {
-                "trigger": {
-                    "triggerPx": take_profit,
-                    "isMarket": True,
-                    "tpsl": "tp"
+                sl_result = self._exchange.order(
+                    coin, not is_buy, size, float(stop_loss) * 0.99,
+                    sl_type, reduce_only=True
+                )
+                
+                # Verify SL response
+                if sl_result.get("status") != "ok":
+                    self.logger.error(f"SL order failed for {coin}: {sl_result}")
+                    if attempt < max_attempts:
+                        time.sleep(1)
+                        continue
+                    return False
+                
+                # Take profit order
+                tp_type = {
+                    "trigger": {
+                        "triggerPx": float(take_profit),
+                        "isMarket": True,
+                        "tpsl": "tp"
+                    }
                 }
-            }
-            self._exchange.order(
-                coin, not is_buy, size, take_profit * 1.01,
-                tp_type, reduce_only=True
-            )
-            
-            self.logger.info(
-                f"Placed SL/TP orders for {coin}: SL={stop_loss:.4f}, TP={take_profit:.4f}"
-            )
-        except Exception as e:
-            self.logger.error(f"Failed to place SL/TP orders: {e}")
-    
+                tp_result = self._exchange.order(
+                    coin, not is_buy, size, float(take_profit) * 1.01,
+                    tp_type, reduce_only=True
+                )
+                
+                # Verify TP response
+                if tp_result.get("status") != "ok":
+                    self.logger.error(f"TP order failed for {coin}: {tp_result}")
+                    if attempt < max_attempts:
+                        time.sleep(1)
+                        continue
+                    return False
+                
+                # Verify orders exist on exchange
+                time.sleep(0.5)  # Brief pause for API propagation
+                open_orders = self.get_open_orders(coin)
+                sl_found = any(
+                    o.get("order", {}).get("trigger", {}).get("tpsl") == "sl"
+                    for o in open_orders
+                )
+                tp_found = any(
+                    o.get("order", {}).get("trigger", {}).get("tpsl") == "tp"
+                    for o in open_orders
+                )
+                
+                if sl_found and tp_found:
+                    self.logger.info(
+                        f"Placed and verified SL/TP orders for {coin}: "
+                        f"SL={stop_loss:.4f}, TP={take_profit:.4f}"
+                    )
+                    return True
+                else:
+                    self.logger.warning(
+                        f"SL/TP orders not confirmed on attempt {attempt}/{max_attempts}: "
+                        f"SL_found={sl_found}, TP_found={tp_found}"
+                    )
+                    if attempt < max_attempts:
+                        time.sleep(1)
+                        continue
+                    
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to place SL/TP orders (attempt {attempt}/{max_attempts}): {e}"
+                )
+                if attempt < max_attempts:
+                    time.sleep(1)
+                    continue
+        
+        self.logger.critical(
+            f"CRITICAL: Failed to confirm SL/TP orders for {coin} after {max_attempts} attempts - "
+            f"position may not be protected!"
+        )
+        return False
     def close_position(
         self,
         coin: str,
@@ -486,7 +547,7 @@ class HyperliquidClient:
         slippage: float = 0.005
     ) -> Tuple[bool, Optional[float]]:
         """
-        Close a position.
+        Close a position (cancels SL/TP orders first).
         
         Args:
             coin: Trading pair
@@ -496,6 +557,9 @@ class HyperliquidClient:
         Returns:
             Tuple of (success, fill_price)
         """
+        # Cancel SL/TP orders BEFORE closing position
+        self._cancel_sl_tp_orders(coin)
+        
         def _execute():
             if not self._exchange:
                 raise HyperliquidClientError("Exchange not initialized")
@@ -525,7 +589,6 @@ class HyperliquidClient:
         except HyperliquidClientError as e:
             self.logger.error(f"Failed to close position: {e}")
             return False, None
-    
     def update_stop_loss(
         self,
         coin: str,
@@ -534,7 +597,7 @@ class HyperliquidClient:
         new_stop_loss: float
     ) -> bool:
         """
-        Update stop loss (cancel old, place new).
+        Update stop loss (cancel old SL, place new one).
         
         Args:
             coin: Trading pair
@@ -547,29 +610,39 @@ class HyperliquidClient:
         """
         from logger import TradeDirection
         
-        # Cancel existing SL orders and place new one
-        # Note: This is simplified - production would track order IDs
+        if not self._exchange:
+            self.logger.error("Cannot update stop loss: exchange not initialized")
+            return False
+        
         try:
+            # CANCEL EXISTING SL ORDERS FIRST
+            self._cancel_sl_tp_orders(coin)
+            
             # Place new SL order
             is_buy = direction == TradeDirection.LONG
             sl_type = {
                 "trigger": {
-                    "triggerPx": new_stop_loss,
+                    "triggerPx": float(new_stop_loss),
                     "isMarket": True,
                     "tpsl": "sl"
                 }
             }
             
-            if self._exchange:
-                self._exchange.order(
-                    coin, not is_buy, size, new_stop_loss * 0.99,
-                    sl_type, reduce_only=True
-                )
+            result = self._exchange.order(
+                coin, not is_buy, size, float(new_stop_loss) * 0.99,
+                sl_type, reduce_only=True
+            )
+            
+            if result.get("status") == "ok":
+                self.logger.debug(f"Updated trailing stop for {coin} to {new_stop_loss:.4f}")
                 return True
+            else:
+                self.logger.error(f"Failed to place new SL order: {result}")
+                return False
+                
         except Exception as e:
             self.logger.error(f"Failed to update stop loss: {e}")
-        
-        return False
+            return False
     
     def cancel_all_orders(self, coin: str) -> bool:
         """Cancel all orders for a coin."""
@@ -582,6 +655,64 @@ class HyperliquidClient:
             self.logger.error(f"Failed to cancel orders: {e}")
         
         return False
+
+    def get_open_orders(self, coin: Optional[str] = None) -> List[Dict]:
+        """Get open orders from Hyperliquid.
+        
+        Args:
+            coin: Optional coin to filter orders. If None, returns all orders.
+            
+        Returns:
+            List of open order dictionaries
+        """
+        if not self._info or not self._wallet:
+            return []
+        
+        try:
+            orders = self._info.open_orders(self._wallet.address)
+            
+            if coin:
+                orders = [o for o in orders if o.get("coin") == coin]
+            
+            return orders
+        except Exception as e:
+            self.logger.error(f"Failed to get open orders: {e}")
+            return []
+    
+    def _cancel_sl_tp_orders(self, coin: str) -> bool:
+        """Cancel all SL/TP orders for a coin.
+        
+        Returns:
+            True if successful
+        """
+        if not self._exchange:
+            return False
+        
+        try:
+            orders = self.get_open_orders(coin)
+            cancelled_count = 0
+            
+            for order in orders:
+                # Check if it's a trigger order (SL/TP)
+                order_type = order.get("order", {})
+                trigger = order_type.get("trigger", {})
+                
+                if trigger and trigger.get("tpsl") in ["sl", "tp"]:
+                    oid = order.get("oid")
+                    if oid:
+                        result = self._exchange.cancel(coin, oid)
+                        if result.get("status") == "ok":
+                            cancelled_count += 1
+                        else:
+                            self.logger.warning(f"Failed to cancel order {oid}: {result}")
+            
+            if cancelled_count > 0:
+                self.logger.debug(f"Cancelled {cancelled_count} SL/TP orders for {coin}")
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to cancel SL/TP orders: {e}")
+            return False
     
     @property
     def is_paused(self) -> bool:
