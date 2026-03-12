@@ -158,8 +158,7 @@ class Config:
         if not self.trading_pairs:
             errors.append("TRADING_PAIRS cannot be empty")
         
-        if len(self.trading_pairs) > 3:
-            errors.append(f"TRADING_PAIRS limited to 3 maximum (got {len(self.trading_pairs)})")
+
         
         # Validate capital
         if self.capital_usdc < MIN_CAPITAL_USDC:
