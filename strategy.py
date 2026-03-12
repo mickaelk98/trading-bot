@@ -52,6 +52,7 @@ import pandas_ta as ta
 
 from config import Config
 from hyperliquid_client import Candle
+from logger import get_logger
 
 
 class Signal(Enum):
@@ -68,6 +69,7 @@ class IndicatorData:
     """Computed indicator values."""
     ema_fast: float
     ema_slow: float
+    ema_trend: float  # EMA 200 for trend filter
     rsi: float
     atr: float
     close: float
@@ -99,6 +101,7 @@ class Strategy:
         # Strategy parameters
         self.ema_fast_period = config.ema_fast_period
         self.ema_slow_period = config.ema_slow_period
+        self.ema_trend_period = config.ema_trend_period  # EMA 200 for trend filter
         self.rsi_period = config.rsi_period
         self.rsi_overbought = config.rsi_overbought
         self.rsi_oversold = config.rsi_oversold
@@ -107,6 +110,7 @@ class Strategy:
         # Minimum candles needed for indicator calculation
         self.min_candles = max(
             self.ema_slow_period,
+            self.ema_trend_period,
             self.rsi_period,
             self.atr_period
         ) + 5  # Buffer for accurate calculations
@@ -136,6 +140,7 @@ class Strategy:
         # Compute EMAs
         ema_fast = ta.ema(df["close"], length=self.ema_fast_period)
         ema_slow = ta.ema(df["close"], length=self.ema_slow_period)
+        ema_trend = ta.ema(df["close"], length=self.ema_trend_period)
         
         # Compute RSI
         rsi = ta.rsi(df["close"], length=self.rsi_period)
@@ -145,6 +150,7 @@ class Strategy:
         
         # Check if the last two values are computed (not NaN) - only these are used
         if (pd.isna(ema_slow.iloc[-1]) or pd.isna(ema_slow.iloc[-2]) or
+            pd.isna(ema_trend.iloc[-1]) or
             pd.isna(rsi.iloc[-1]) or pd.isna(rsi.iloc[-2]) or
             pd.isna(atr.iloc[-1])):
             return None
@@ -153,6 +159,7 @@ class Strategy:
         return IndicatorData(
             ema_fast=float(ema_fast.iloc[-1]),
             ema_slow=float(ema_slow.iloc[-1]),
+            ema_trend=float(ema_trend.iloc[-1]),
             rsi=float(rsi.iloc[-1]),
             atr=float(atr.iloc[-1]),
             close=float(df["close"].iloc[-1]),
@@ -210,13 +217,31 @@ class Strategy:
                 return Signal.EXIT_SHORT, indicators
         
         else:  # No position
-            # Long entry: bullish crossover + RSI not overbought
-            if bullish_crossover and rsi_not_overbought:
-                return Signal.LONG, indicators
+            logger = get_logger()
             
-            # Short entry: bearish crossover + RSI not oversold
+            # Long entry: bullish crossover + RSI not overbought + price above EMA200
+            if bullish_crossover and rsi_not_overbought:
+                # EMA 200 trend filter: only allow longs above EMA200
+                if indicators.close > indicators.ema_trend:
+                    return Signal.LONG, indicators
+                else:
+                    logger.info(
+                        f"Signal LONG ignoré — prix au-dessous de EMA{self.ema_trend_period} "
+                        f"({indicators.ema_trend:.4f})"
+                    )
+                    return Signal.NONE, indicators
+            
+            # Short entry: bearish crossover + RSI not oversold + price below EMA200
             if bearish_crossover and rsi_not_oversold:
-                return Signal.SHORT, indicators
+                # EMA 200 trend filter: only allow shorts below EMA200
+                if indicators.close < indicators.ema_trend:
+                    return Signal.SHORT, indicators
+                else:
+                    logger.info(
+                        f"Signal SHORT ignoré — prix au-dessus de EMA{self.ema_trend_period} "
+                        f"({indicators.ema_trend:.4f})"
+                    )
+                    return Signal.NONE, indicators
         
         return Signal.NONE, indicators
     

@@ -57,6 +57,7 @@ class Config:
     # Strategy parameters
     ema_fast_period: int = 9
     ema_slow_period: int = 21
+    ema_trend_period: int = 200  # EMA trend filter (background trend)
     rsi_period: int = 14
     rsi_overbought: float = 70.0
     rsi_oversold: float = 30.0
@@ -121,6 +122,7 @@ class Config:
         # Strategy parameters
         self.ema_fast_period = int(os.getenv("EMA_FAST_PERIOD", "9"))
         self.ema_slow_period = int(os.getenv("EMA_SLOW_PERIOD", "21"))
+        self.ema_trend_period = int(os.getenv("EMA_TREND_PERIOD", "200"))
         self.rsi_period = int(os.getenv("RSI_PERIOD", "14"))
         self.rsi_overbought = float(os.getenv("RSI_OVERBOUGHT", "70"))
         self.rsi_oversold = float(os.getenv("RSI_OVERSOLD", "30"))
