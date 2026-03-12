@@ -20,6 +20,19 @@ PRICE_PRECISION = {
     "ETH": 1,      # ETH tick size is $0.10
     "SOL": 2,      # SOL tick size is $0.01
     "DOGE": 5,     # DOGE tick size is $0.00001
+    "XRP": 4,      # XRP tick size is $0.0001
+    "DEFAULT": 2,  # Default 2 decimals
+}
+
+
+# Size rounding precision for different coins (decimal places)
+# Hyperliquid has different size precision requirements per coin
+SIZE_PRECISION = {
+    "BTC": 4,      # BTC size: 0.0001
+    "ETH": 3,      # ETH size: 0.001
+    "SOL": 1,      # SOL size: 0.1
+    "XRP": 1,      # XRP size: 0.1
+    "DOGE": 0,     # DOGE size: whole numbers
     "DEFAULT": 2,  # Default 2 decimals
 }
 
@@ -38,6 +51,22 @@ def round_price(price: float, coin: str = "DEFAULT") -> float:
     """
     precision = PRICE_PRECISION.get(coin, PRICE_PRECISION["DEFAULT"])
     return round(price, precision)
+
+
+def round_size(size: float, coin: str = "DEFAULT") -> float:
+    """Round position size to appropriate precision for Hyperliquid API.
+    
+    Different coins have different size precision requirements.
+    
+    Args:
+        size: Position size to round
+        coin: Trading pair to determine precision
+        
+    Returns:
+        Rounded size
+    """
+    precision = SIZE_PRECISION.get(coin, SIZE_PRECISION["DEFAULT"])
+    return round(size, precision)
 
 @dataclass
 class Position:
@@ -427,9 +456,10 @@ class HyperliquidClient:
             # Set leverage first
             self._exchange.update_leverage(self.config.leverage, coin, is_cross=True)
             
-            # Open market position
+            # Open market position with rounded size
+            rounded_size = round_size(size, coin)
             result = self._exchange.market_open(
-                coin, is_buy, size, slippage=slippage
+                coin, is_buy, rounded_size, slippage=slippage
             )
             
             if result.get("status") != "ok":
@@ -449,7 +479,9 @@ class HyperliquidClient:
             
             # Place SL/TP orders if specified
             if stop_loss and take_profit:
-                self._place_sl_tp_orders(coin, is_buy, size, stop_loss, take_profit)
+                # Round size to coin-specific precision
+                rounded_size = round_size(size, coin)
+                self._place_sl_tp_orders(coin, is_buy, rounded_size, stop_loss, take_profit)
             
             return True, fill_price
         
@@ -732,7 +764,7 @@ class HyperliquidClient:
             }
             
             result = self._exchange.order(
-                coin, not is_buy, size, sl_limit,
+                coin, not is_buy, round_size(size, coin), sl_limit,
                 sl_type, reduce_only=True
             )
             
