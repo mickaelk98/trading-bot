@@ -170,7 +170,7 @@ class TradingBot:
         )
         
         position_size = self.risk_manager.calculate_position_size(
-            current_price, stop_loss, signal
+            current_price, stop_loss, signal, coin
         )
         
         # Validate trade

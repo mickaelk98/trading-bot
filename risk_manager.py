@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from config import Config
-from hyperliquid_client import HyperliquidClient
+from hyperliquid_client import HyperliquidClient, round_size
 from logger import TradeLogger, TradeDirection, get_logger
 from strategy import Signal
 
@@ -68,7 +68,8 @@ class RiskManager:
         self,
         entry_price: float,
         stop_loss_price: float,
-        signal: Signal
+        signal: Signal,
+        coin: str = "DEFAULT"
     ) -> PositionSize:
         """
         Calculate position size based on risk parameters.
@@ -80,6 +81,7 @@ class RiskManager:
             entry_price: Planned entry price
             stop_loss_price: Stop loss price
             signal: Trade direction
+            coin: Trading pair for size precision (e.g., "BTC", "XRP")
             
         Returns:
             PositionSize with calculated values
@@ -113,7 +115,7 @@ class RiskManager:
             risk_amount = self.capital * self.max_risk_per_trade
         
         return PositionSize(
-            size=round(leveraged_size, 4),  # Round to 4 decimals for Hyperliquid API
+            size=round_size(leveraged_size, coin),  # Round to coin-specific precision
             notional_value=notional_value,
             risk_amount=risk_amount,
             max_loss_percent=self.max_risk_per_trade * 100
