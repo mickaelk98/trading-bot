@@ -46,6 +46,31 @@ services:
   #   depends_on:
   #     - bot
 
+  # Backtest service (on-demand only)
+  # Usage: docker compose -f docker-compose.dev.yml run backtest --symbol BTC/USDT
+  backtest:
+    build:
+      context: ./backtest
+      dockerfile: Dockerfile
+    container_name: hyperliquid-backtest-dev
+    restart: "no"
+    volumes:
+      # Persist downloaded data
+      - ./backtest/data:/app/data
+      # Persist HTML reports
+      - ./backtest/results:/app/results
+    environment:
+      - SYMBOL=BTC/USDT ETH/USDT
+      - TIMEFRAME=15m
+      - DAYS=365
+      - CASH=10000
+      - RISK=0.01
+      - LEVERAGE=1
+    profiles:
+      - backtest
+    networks:
+      - trading-network
+
 networks:
   trading-network:
     driver: bridge

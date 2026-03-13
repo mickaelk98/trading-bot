@@ -104,6 +104,37 @@ docker-compose -f docker-compose.prod.yml logs -f bot
 docker-compose -f docker-compose.prod.yml down
 ```
 
+#### Backtest (on-demand)
+
+The backtest service runs once and stops. It doesn't start with normal `docker compose up`.
+
+```bash
+# Run backtest with default settings (BTC/USDT ETH/USDT, 15m, 365 days)
+docker-compose -f docker-compose.prod.yml run backtest
+
+# Run backtest with custom parameters
+docker-compose -f docker-compose.prod.yml run backtest \
+  --symbol BTC/USDT --timeframe 1h --days 180 --cash 5000
+
+# Override via environment variables
+docker-compose -f docker-compose.prod.yml run \
+  -e SYMBOL=SOL/USDT -e DAYS=90 -e TIMEFRAME=4h backtest
+
+# Results are saved to backtest/results/ as HTML files
+```
+
+**Available CLI arguments:**
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--symbol` / `-s` | BTC/USDT ETH/USDT | Trading pairs (space-separated) |
+| `--timeframe` / `-t` | 15m | Candle interval |
+| `--days` / `-d` | 365 | Historical data length |
+| `--cash` / `-c` | 10000 | Initial capital |
+| `--risk` | 0.01 | Risk per trade (0.01 = 1%) |
+| `--leverage` | 1 | Leverage multiplier |
+| `--no-trailing` | - | Disable trailing stops |
+
 ---
 
 ## Configuration
@@ -175,6 +206,12 @@ trading-bot/
 ├── Dockerfile           # Container image
 ├── docker-compose.dev.yml  # Development (testnet)
 ├── docker-compose.prod.yml # Production (real money)
+├── backtest/            # Backtest module (independent)
+│   ├── run_backtest.py  # Main backtest script
+│   ├── requirements.txt # Backtest dependencies
+│   ├── Dockerfile       # Backtest container
+│   ├── data/            # Cached OHLCV data (CSV)
+│   └── results/         # HTML reports
 ├── logs/                # Log files (gitignored)
 │   ├── bot.log          # General logs
 │   ├── trades.jsonl     # Trade history (JSON Lines)

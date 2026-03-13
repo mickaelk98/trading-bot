@@ -8,18 +8,13 @@ Automated trading bot for Hyperliquid DEX perpetual futures. Python 3.11+, modul
 
 **Stack**: hyperliquid-python-sdk, pandas, pandas-ta, eth-account, python-dotenv
 
+**Strategy**: EMA(9)/EMA(21) crossover + RSI(14) filter + EMA(200) trend filter + ATR-based stops
+
 ## Important Files
 
-- **ROADMAP.md** — Feature tracking with priorities. Check this for pending tasks and implementation status.
+- **ROADMAP.md** — Feature tracking with priorities. Check this for pending tasks.
 - **.env** — Environment configuration (never commit, contains private key)
-
-Guidelines for AI coding agents working in this Hyperliquid Trading Bot repository.
-
-## Project Overview
-
-Automated trading bot for Hyperliquid DEX perpetual futures. Python 3.11+, modular architecture.
-
-**Stack**: hyperliquid-python-sdk, pandas, pandas-ta, eth-account, python-dotenv
+- **backtest/** — Independent backtest module with its own Dockerfile
 
 ## Build & Run Commands
 
@@ -36,15 +31,46 @@ cp .env.example .env
 # Run the bot
 python main.py
 
-# Syntax check
+# Syntax check (all bot files)
 python -m py_compile main.py config.py hyperliquid_client.py strategy.py risk_manager.py logger.py
 
-# Docker development (testnet)
+# Docker development (testnet, hot reload)
 docker-compose -f docker-compose.dev.yml up --build
 
 # Docker production
 docker-compose -f docker-compose.prod.yml up -d --build
+
+# Docker backtest (on-demand, not auto-started)
+docker-compose -f docker-compose.prod.yml run backtest --symbol BTC/USDT --timeframe 1h
 ```
+
+## Backtest Commands
+
+The backtest module is completely independent from the bot code.
+
+```bash
+# Local run
+cd backtest
+pip install -r requirements.txt
+python run_backtest.py --symbol BTC/USDT ETH/USDT --timeframe 15m --days 365
+
+# Docker run
+docker-compose -f docker-compose.prod.yml run backtest \
+  --symbol BTC/USDT --timeframe 1h --days 180 --cash 5000
+
+# Override via environment variables
+docker-compose -f docker-compose.prod.yml run \
+  -e SYMBOL=SOL/USDT -e DAYS=90 backtest
+```
+
+**Backtest CLI arguments:**
+- `--symbol` / `-s`: Trading pairs (space-separated)
+- `--timeframe` / `-t`: Candle interval (15m, 1h, 4h, etc.)
+- `--days` / `-d`: Historical data length
+- `--cash` / `-c`: Initial capital
+- `--risk`: Risk per trade (0.01 = 1%)
+- `--leverage`: Leverage multiplier
+- `--no-trailing`: Disable trailing stops
 
 ## Testing
 
@@ -82,6 +108,12 @@ pytest --cov=. tests/
 ├── Dockerfile           # Container image
 ├── docker-compose.dev.yml  # Dev (testnet, hot reload)
 ├── docker-compose.prod.yml # Prod (production)
+├── backtest/            # Independent backtest module
+│   ├── run_backtest.py  # Main backtest script
+│   ├── requirements.txt # backtesting, ccxt, pandas, pandas-ta
+│   ├── Dockerfile       # Backtest container
+│   ├── data/            # Cached OHLCV data (CSV)
+│   └── results/         # HTML reports
 └── logs/                # Log files (gitignored)
 ```
 
@@ -193,10 +225,6 @@ class HyperliquidClientError(Exception):
     """Custom exception for Hyperliquid client errors."""
     pass
 
-class APITimeoutError(HyperliquidClientError):
-    """Raised when API is unavailable for extended period."""
-    pass
-
 # Usage
 try:
     result = self._exchange.market_open(coin, is_buy, size)
@@ -210,19 +238,13 @@ except Exception as e:
 Use the global logger via `get_logger()`:
 
 ```python
-from logger import TradeLogger, get_logger
+from logger import get_logger
 
 logger = get_logger()
 logger.info(f"Processing {coin}")
 logger.warning(f"Trade validation failed: {error}")
 logger.error(f"API call failed: {e}")
 logger.debug(f"Indicators: EMA={ema:.2f}, RSI={rsi:.1f}")
-```
-
-For trade-specific logging:
-```python
-logger.log_entry(coin, direction, price, size, stop_loss, take_profit)
-logger.log_exit(coin, direction, exit_price, entry_price, size, pnl, reason)
 ```
 
 ### Configuration
@@ -234,7 +256,6 @@ logger.log_exit(coin, direction, exit_price, entry_price, size, pnl, reason)
 ```python
 from config import config
 
-# Use config values
 leverage = config.leverage
 pairs = config.trading_pairs
 api_url = config.api_url  # Automatically set based on ENVIRONMENT
@@ -248,6 +269,23 @@ These are hardcoded and must not be changed without explicit user request:
 - Default environment: testnet (never production)
 - Production mode shows warning + 5 second delay before starting
 
+## Strategy Logic
+
+### Entry Conditions
+- **LONG**: EMA(9) crosses above EMA(21) + RSI < 70 + Close > EMA(200)
+- **SHORT**: EMA(9) crosses below EMA(21) + RSI > 30 + Close < EMA(200)
+
+### Exit Conditions
+- **Exit LONG**: EMA(9) crosses below EMA(21)
+- **Exit SHORT**: EMA(9) crosses above EMA(21)
+- Stop Loss or Take Profit hit
+
+### Risk Management
+- Stop Loss: ATR × 2
+- Take Profit: SL distance × reward_ratio (default 2.0)
+- Trailing Stop: ATR × 1.5 (only when in profit)
+- Position sizing: 1% risk per trade
+
 ## Key Patterns
 
 ### Retry Logic with Exponential Backoff
@@ -260,20 +298,6 @@ for attempt in range(self.config.max_retries):
     except Exception as e:
         delay = self.config.retry_base_delay * (2 ** attempt)
         time.sleep(delay)
-```
-
-### Position Tracking
-
-Positions are tracked in-memory for trailing stops. Real positions come from API:
-
-```python
-def _check_position_status(self, coin: str) -> Optional[str]:
-    # Check tracked positions first
-    if coin in self.positions:
-        return self.positions[coin].direction.value
-    # Then check API
-    positions = self.client.get_positions()
-    ...
 ```
 
 ### Strategy Signal Flow
@@ -303,3 +327,14 @@ def _check_position_status(self, coin: str) -> Optional[str]:
 **Modify risk parameters**: Update `risk_manager.py` or `.env` settings
 
 **Add new API endpoint**: Add method to `hyperliquid_client.py` with retry wrapper
+
+**Run backtest**: `docker-compose -f docker-compose.prod.yml run backtest --symbol BTC/USDT`
+
+## Backtest Module Notes
+
+The `backtest/` folder is **completely independent** from the bot:
+- No imports from `strategy.py`, `risk_manager.py`, or any bot file
+- Strategy logic is reimplemented from scratch to match production exactly
+- Data fetched from Binance via ccxt (not Hyperliquid)
+- Results saved as HTML in `backtest/results/`
+- CSV data cached in `backtest/data/` for 24 hours
