@@ -572,6 +572,7 @@ def main():
         'days': get_env_default('DAYS', 365, int),
         'cash': get_env_default('CASH', 10000.0, float),
         'risk': get_env_default('RISK', 0.01, float),
+        'rr': get_env_default('RR', 2.0, float),
         'leverage': get_env_default('LEVERAGE', 1, int),
     }
     
@@ -610,6 +611,12 @@ def main():
         help='Risk per trade as decimal (default: 0.01 = 1%%)'
     )
     parser.add_argument(
+        '--rr',
+        type=float,
+        default=env_defaults['rr'],
+        help='Reward-to-risk ratio (default: 2.0 = 2:1)'
+    )
+    parser.add_argument(
         '--leverage',
         type=int,
         default=env_defaults['leverage'],
@@ -627,6 +634,7 @@ def main():
     config = BacktestConfig(
         cash=args.cash,
         risk_per_trade=args.risk,
+        reward_to_risk_ratio=args.rr,
         leverage=args.leverage,
         trailing_stop_enabled=not args.no_trailing
     )
