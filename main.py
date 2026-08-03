@@ -377,9 +377,14 @@ class TradingBot:
                 
                 # Check if API is available
                 if self.client.is_paused:
-                    self.logger.warning("Bot paused due to API issues, waiting...")
-                    time.sleep(60)
-                    continue
+                    self.logger.warning("Bot paused due to API issues, probing for recovery...")
+                    if self.client.health_check():
+                        self.logger.info("API recovered, resuming normal operations")
+                        self.paused = False
+                        # Fall through: re-run the loop immediately instead of sleeping
+                    else:
+                        time.sleep(60)
+                        continue
                 
                 # Update capital
                 self.risk_manager.update_capital()

@@ -866,3 +866,22 @@ class HyperliquidClient:
     def is_paused(self) -> bool:
         """Check if client is paused due to API issues."""
         return self._is_paused
+
+    def health_check(self) -> bool:
+        """
+        Probe the API to detect recovery while the bot is paused.
+
+        Runs a lightweight call through _retry_api_call, which resets
+        _is_paused automatically on success. Returns True if the API
+        is reachable, False otherwise. Never raises: callers may invoke
+        this safely inside the paused branch of the main loop.
+        """
+        try:
+            self._retry_api_call(self._info.user_state, self._wallet.address)
+            return True
+        except (APITimeoutError, HyperliquidClientError) as e:
+            self.logger.debug(f"Health check failed: {e}")
+            return False
+        except Exception as e:
+            self.logger.debug(f"Health check unexpected error: {e}")
+            return False
